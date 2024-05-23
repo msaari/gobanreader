@@ -197,6 +197,20 @@ function analyze_game_position(&$game_position) {
             }
         }
     }
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    foreach ($area_neighbors as $area => $neighbors) {
+        $unique_neighbors = array_values(array_unique($neighbors));
+        if (count($unique_neighbors) == 1 && $unique_neighbors[0] != ' ') {
+            foreach ($areas[$area] as $point) {
+                list($x, $y) = alphabet2xy($point);
+                if ($game_position[$x][$y] != 'C' && $game_position[$x][$y] != 'X') {
+                    $game_position[$x][$y] = $unique_neighbors[0] == 'B' ? 'b' : 'w';
+                }
+            }
+        }
+    }
 }
 
 function alphabet2xy($code) {
@@ -205,7 +219,24 @@ function alphabet2xy($code) {
     return [$x, $y];
 }
 
+function type_match($a, $b) {
+    if ($a == ' ' && $b == 'C') {
+        return true;
+    }
+    if ($a == ' ' && $b == 'X') {
+        return true;
+    }
+    if ($b == ' ' && $a == 'C') {
+        return true;
+    }
+    if ($b == ' ' && $a == 'X') {
+        return true;
+    }
+    return $a == $b;
+}
+
 function find_all_areas($game_position) {
+    global $area_debug;
     echo "Finding all chains...\n";
     $areas = [];
     $area_by_point = [];
@@ -213,6 +244,7 @@ function find_all_areas($game_position) {
 
     $height = count($game_position);
     $width = count($game_position[0]);
+
     for ($orig_y = 0; $orig_y < $height; $orig_y++) {
         for ($orig_x = 0; $orig_x < $width; $orig_x++) {
             $code = int2alphabet($orig_x + 1) . int2alphabet($orig_y + 1);
@@ -223,43 +255,42 @@ function find_all_areas($game_position) {
             $area = [];
             $queue = [[$orig_x, $orig_y]];
             $type = $game_position[$orig_x][$orig_y];
-            if ($type == 'C' || $type == 'X') {
-                $type = ' ';
-            }
+
             $temp_game_position = $game_position;
             while ($queue) {
                 $point = array_shift($queue);
                 $x = $point[0];
                 $y = $point[1];
                 $code = int2alphabet($x + 1) . int2alphabet($y + 1);
-                if ($temp_game_position[$x][$y] == $type) {
+                if (type_match($temp_game_position[$x][$y], $type)) {
+                    echo $temp_game_position[$x][$y] . " and $type match\n";
                     $area[] = $code;
                     $temp_game_position[$x][$y] = 'a';
-                    if ($y > 0 && $temp_game_position[$x][$y - 1] == $type) {
+                    if ($y > 0 && type_match($temp_game_position[$x][$y - 1], $type)) {
                         $queue[] = [$x, $y - 1];
                     }
-                    if ($y < $width - 1 && $temp_game_position[$x][$y + 1] == $type) {
+                    if ($y < $width - 1 && type_match($temp_game_position[$x][$y + 1], $type)) {
                         $queue[] = [$x, $y + 1];
                     }
-                    if ($x > 0 && $temp_game_position[$x - 1][$y] == $type) {
+                    if ($x > 0 && type_match($temp_game_position[$x - 1][$y], $type)) {
                         $queue[] = [$x - 1, $y];
                     }
-                    if ($x < $height - 1 && $temp_game_position[$x + 1][$y] == $type) {
+                    if ($x < $height - 1 && type_match($temp_game_position[$x + 1][$y], $type)) {
                         $queue[] = [$x + 1, $y];
                     }
-                    if ($y > 0 && $temp_game_position[$x][$y - 1] != $type && $temp_game_position[$x][$y - 1] != 'a') {
+                    if ($y > 0 && !type_match($temp_game_position[$x][$y - 1], $type) && $temp_game_position[$x][$y - 1] != 'a') {
                         $t_code = int2alphabet($x) . int2alphabet($y - 1);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y - 1];
                     }
-                    if ($y < $width - 1 && $temp_game_position[$x][$y + 1] != $type && $temp_game_position[$x][$y + 1] != 'a') {
+                    if ($y < $width - 1 && !type_match($temp_game_position[$x][$y + 1], $type) && $temp_game_position[$x][$y + 1] != 'a') {
                         $t_code = int2alphabet($x) . int2alphabet($y + 1);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y + 1];
                     }
-                    if ($x > 0 && $temp_game_position[$x - 1][$y] != $type && $temp_game_position[$x - 1][$y] != 'a') {
+                    if ($x > 0 && !type_match($temp_game_position[$x - 1][$y], $type) && $temp_game_position[$x - 1][$y] != 'a') {
                         $t_code = int2alphabet($x - 1) . int2alphabet($y);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x - 1][$y];
                     }
-                    if ($x < $height - 1 && $temp_game_position[$x + 1][$y] != $type && $temp_game_position[$x + 1][$y] != 'a') {
+                    if ($x < $height - 1 && !type_match($temp_game_position[$x + 1][$y], $type) && $temp_game_position[$x + 1][$y] != 'a') {
                         $t_code = int2alphabet($x + 1) . int2alphabet($y);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x + 1][$y];
                     }
