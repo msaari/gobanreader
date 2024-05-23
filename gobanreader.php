@@ -12,13 +12,14 @@ $image = imagecreatefromjpeg($src);
 $width = imagesx($image);
 $height = imagesy($image);
 
-//$gray_image = create_grayscale_image($image);
-//$edge_image = create_edge_image($gray_image);
+$gray_image = create_grayscale_image($image);
+$edge_image = create_edge_image($gray_image);
 $edge_image = imagecreatefromjpeg('edge.jpg');
 $bounding_box = find_goban_edges($edge_image);
 
 echo "Cropping...";
 $cropped_image = imagecrop($image, $bounding_box);
+imagejpeg($cropped_image, 'cropped.jpg');
 
 $matrix = create_brightness_matrix($cropped_image, $goban_size);
 
@@ -211,9 +212,9 @@ function create_grayscale_image($image) {
 
 function analyze_point($brightness) {
     global $black_threshold, $white_threshold;
-    if ($brightness['average'] < $black_threshold) {
+    if ($brightness['average'] <= $black_threshold) {
         return 'black';
-    } elseif ($brightness['average'] > $white_threshold) {
+    } elseif ($brightness['average'] >= $white_threshold) {
         return 'white';
     } elseif ($brightness['lowest'] > 0) {
         return 'white';
@@ -381,8 +382,8 @@ function create_brightness_matrix($cropped_image, $goban_size) {
     $x_step = round($width / $goban_size);
     $y_step = round($height / $goban_size);
 
-    $square_x = round($x_step / 3) * 2;
-    $square_y = round($y_step / 3) * 2;
+    $square_x = round($x_step / 3);
+    $square_y = round($y_step / 3);
 
     echo "Image size: $width x $height\n";
     echo "Grid size: $x_step x $y_step\n";
@@ -398,13 +399,13 @@ function create_brightness_matrix($cropped_image, $goban_size) {
             $highest_brightness = 0;
             $total_brightness = 0;
             $total_saturation = 0;
-            $start_x = $x + $square_x / 2;
-            $start_y = $y + $square_y / 2;
+            $start_x = $x + $square_x;
+            $start_y = $y + $square_y;
             $end_x = $start_x + $square_x;
             $end_y = $start_y + $square_y;
             $counter = 0;
-            for ( $pixel_y = $start_y; $pixel_y < $end_y; $pixel_y++ ) {
-                for ( $pixel_x = $start_x; $pixel_x < $end_x; $pixel_x++ ) {
+            for ($pixel_y = $start_y; $pixel_y < $end_y; $pixel_y = $pixel_y + 2) {
+                for ($pixel_x = $start_x; $pixel_x < $end_x; $pixel_x = $pixel_x + 2) {
                     $pixel_color = @imagecolorat($cropped_image, $pixel_x, $pixel_y);
                     $pixel_rgb = imagecolorsforindex($cropped_image, $pixel_color);
                     $pixel_brightness = brightness_from_rgb($pixel_rgb);
@@ -418,12 +419,6 @@ function create_brightness_matrix($cropped_image, $goban_size) {
                     $total_saturation += saturation_from_rgb($pixel_rgb);
                     $counter++;
                 }
-            }
-
-            if ($column_count == 2 && $row_count == 1) {
-                echo "Total saturation: $total_saturation\n";
-                echo "Counter: $counter - " . ($square_x * $square_y) . "\n";
-                echo "Average saturation: " . round($total_saturation / ($square_x * $square_y)) . "\n";
             }
 
             $average_brightness = round($total_brightness / ($square_x * $square_y));
@@ -441,8 +436,8 @@ function create_brightness_matrix($cropped_image, $goban_size) {
             echo str_pad($average_brightness, 3) . " ";
 
             imagerectangle($grid_image,
-                $x + $square_x, $y + $square_y,
-                $x + $x_step - $square_x, $y + $y_step - $square_y,
+                $start_x, $start_y,
+                $end_x, $end_y,
                 imagecolorallocate($grid_image, 100, 100, 0)
             );
             imagestring(
@@ -485,8 +480,6 @@ function saturation_from_rgb($rgb) {
     $max = max($r, $g, $b);
     $min = min($r, $g, $b);
     $delta = $max - $min;
-    $saturation = $max == 0 ? 0 : $delta / $max;
-    $saturation = round($saturation * 255);
 
-    return $saturation;
+    return $delta;
 }
