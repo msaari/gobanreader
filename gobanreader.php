@@ -9,11 +9,9 @@ $goban_size = 19;
 //$src = 'images/vinogoban.jpg';
 $src = 'images/table.jpg';
 $image = imagecreatefromjpeg($src);
-$width = imagesx($image);
-$height = imagesy($image);
 
-$gray_image = create_grayscale_image($image);
-$edge_image = create_edge_image($gray_image);
+//$gray_image = create_grayscale_image($image);
+//$edge_image = create_edge_image($gray_image);
 $edge_image = imagecreatefromjpeg('edge.jpg');
 $bounding_box = find_goban_edges($edge_image);
 
@@ -22,30 +20,7 @@ $cropped_image = imagecrop($image, $bounding_box);
 imagejpeg($cropped_image, 'cropped.jpg');
 
 $matrix = create_brightness_matrix($cropped_image, $goban_size);
-
-echo "\n";
-do {
-    $clusters = kmeans($matrix['average_brightness_values'], 3);
-} while ( count($clusters) != 3 );
-
-foreach ( $clusters as $key => $cluster ) {
-    echo "Cluster $key: " . min($cluster) . "-" . max($cluster) . "\n";
-}
-echo "\n";
-
-$black_key = min(array_keys($clusters));
-echo "Black key: $black_key\n";
-
-$white_key = max(array_keys($clusters));
-echo "White key: $white_key\n";
-
-$black_threshold = max($clusters[$black_key]);
-$white_threshold = min($clusters[$white_key]);
-
-echo "Black threshold: $black_threshold\n";
-echo "White threshold: $white_threshold\n";
-
-echo "\n";
+list($black_threshold, $white_threshold) = calculate_thresholds($matrix['average_brightness_values']);
 
 $goban_image = imagecreatefrompng('images/goban.png');
 $goban_width = imagesx($goban_image);
@@ -61,7 +36,17 @@ $black_stone = imagecreatefrompng('images/black.png');
 $stone_width = imagesx($white_stone);
 $stone_height = imagesy($white_stone);
 
+$white_captured = imagecreatefrompng('images/whitecaptured.png');
+$black_captured = imagecreatefrompng('images/blackcaptured.png');
+
+$white_area = imagecreatefrompng('images/whitearea.png');
+$black_area = imagecreatefrompng('images/blackarea.png');
+$area_width = imagesx($white_area);
+$area_height = imagesy($white_area);
+
 $sgf = '(AP[GobanReader:0.10];GM[1];FF[5];';
+
+$game_position = [];
 
 $row_count = 0;
 foreach ($matrix['grid_brightness'] as $row) {
@@ -69,29 +54,77 @@ foreach ($matrix['grid_brightness'] as $row) {
     foreach ($row as $brightness) {
         $point = analyze_point($brightness);
         if ($point == 'black') {
+            $game_position[$row_count][$column_count] = 'B';
             $sgf .= 'AB[' . int2alphabet($column_count + 1)
                 . int2alphabet($row_count + 1) . '];';
-            imagecopy($goban_image, $black_stone,
-                $column_count * $goban_x_step,
-                $row_count * $goban_y_step,
-                0,
-                0,
-                $stone_width,
-                $stone_height);
         } elseif ($point == 'white') {
+            $game_position[$row_count][$column_count] = 'W';
             $sgf .= 'AW[' . int2alphabet($column_count + 1)
                 . int2alphabet($row_count + 1) . '];';
-            imagecopy($goban_image, $white_stone,
-                $column_count * $goban_x_step,
-                $row_count * $goban_y_step,
-                0,
-                0,
-                $stone_width,
-                $stone_height);
+        } else {
+            $game_position[$row_count][$column_count] = ' ';
         }
         $column_count++;
     }
     $row_count++;
+}
+
+analyze_game_position($game_position);
+
+$row_count = 0;
+foreach ($game_position as $row) {
+    $column_count = 0;
+    foreach ($row as $point) {
+        echo $point;
+        $item = '';
+        $item_w = '';
+        $item_h = '';
+        switch ($point) {
+            case 'B':
+                $item = $black_stone;
+                $item_w = $stone_width;
+                $item_h = $stone_height;
+                break;
+            case 'C':
+                $item = $black_captured;
+                $item_w = $stone_width;
+                $item_h = $stone_height;
+                break;
+            case 'W':
+                $item = $white_stone;
+                $item_w = $stone_width;
+                $item_h = $stone_height;
+                break;
+            case 'X':
+                $item = $white_captured;
+                $item_w = $stone_width;
+                $item_h = $stone_height;
+                break;
+            case 'b':
+                $item = $black_area;
+                $item_w = $area_width;
+                $item_h = $area_height;
+                break;
+            case 'w':
+                $item = $white_area;
+                $item_w = $area_width;
+                $item_h = $area_height;
+                break;
+            default:
+        }
+        if ($item) {
+            imagecopy($goban_image, $item,
+                $column_count * $goban_x_step,
+                $row_count * $goban_y_step,
+                0,
+                0,
+                $item_w,
+                $item_h);
+        }
+        $column_count++;
+    }
+    $row_count++;
+    echo "\n";
 }
 
 echo "Creating goban image...\n\n";
@@ -104,6 +137,143 @@ echo $sgf;
 
 $elapsed = round(microtime(true) - $time, 1);
 echo "\nElapsed time: $elapsed s\n";
+
+function analyze_game_position(&$game_position) {
+    $height = count($game_position);
+    $width = count($game_position[0]);
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    foreach ($area_neighbors as $area => $neighbors) {
+        $neighbors = array_values($neighbors);
+        $empty_count = count(array_keys($neighbors, ' '));
+        if ($empty_count == 1) {
+            foreach ($areas[$area] as $point) {
+                list($x, $y) = alphabet2xy($point);
+                $game_position[$x][$y] = $game_position[$x][$y] == 'B' ? 'C' : 'X';
+            }
+        }
+    }
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    foreach ($area_neighbors as $area => $neighbors) {
+        $unique_neighbors = array_values(array_unique($neighbors));
+        if (count($unique_neighbors) == 1 && $unique_neighbors[0] != ' ') {
+            foreach ($areas[$area] as $point) {
+                list($x, $y) = alphabet2xy($point);
+                $game_position[$x][$y] = $unique_neighbors[0] == 'B' ? 'b' : 'w';
+            }
+        }
+    }
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    foreach ($area_neighbors as $area => $neighbors) {
+        $area_size = count($areas[$area]);
+        if ($area_size < 3) {
+            $unique_neighbors = array_values(array_unique($neighbors));
+            list($ax, $ay) = alphabet2xy($areas[$area][0]);
+            $area_type = $game_position[$ax][$ay];
+            if ($area_type != 'W' && $area_type != 'B') {
+                continue;
+            }
+            $kill_group = false;
+            if ($area_type == 'B' && (!in_array('B', $neighbors) && !in_array('b', $neighbors))) {
+                $kill_group = true;
+            }
+            if ($area_type == 'W' && (!in_array('w', $neighbors) && !in_array('w', $neighbors))) {
+                $kill_group = true;
+            }
+            if (count($unique_neighbors) == 1 && $unique_neighbors[0] == ' ') {
+                $kill_group = false;
+            }
+
+            if ($kill_group) {
+                foreach ($areas[$area] as $point) {
+                    list($x, $y) = alphabet2xy($point);
+                    $game_position[$x][$y] = $area_type == 'B' ? 'C' : 'X';
+                }
+            }
+        }
+    }
+}
+
+function alphabet2xy($code) {
+    $x = ord($code[0]) - 97;
+    $y = ord($code[1]) - 97;
+    return [$x, $y];
+}
+
+function find_all_areas($game_position) {
+    echo "Finding all chains...\n";
+    $areas = [];
+    $area_by_point = [];
+    $area_neighbors = [];
+
+    $height = count($game_position);
+    $width = count($game_position[0]);
+    for ($orig_y = 0; $orig_y < $height; $orig_y++) {
+        for ($orig_x = 0; $orig_x < $width; $orig_x++) {
+            $code = int2alphabet($orig_x + 1) . int2alphabet($orig_y + 1);
+            if (isset($area_by_point[$code])) {
+                continue;
+            }
+            $area_id = count($areas);
+            $area = [];
+            $queue = [[$orig_x, $orig_y]];
+            $type = $game_position[$orig_x][$orig_y];
+            if ($type == 'C' || $type == 'X') {
+                $type = ' ';
+            }
+            $temp_game_position = $game_position;
+            while ($queue) {
+                $point = array_shift($queue);
+                $x = $point[0];
+                $y = $point[1];
+                $code = int2alphabet($x + 1) . int2alphabet($y + 1);
+                if ($temp_game_position[$x][$y] == $type) {
+                    $area[] = $code;
+                    $temp_game_position[$x][$y] = 'a';
+                    if ($y > 0 && $temp_game_position[$x][$y - 1] == $type) {
+                        $queue[] = [$x, $y - 1];
+                    }
+                    if ($y < $width - 1 && $temp_game_position[$x][$y + 1] == $type) {
+                        $queue[] = [$x, $y + 1];
+                    }
+                    if ($x > 0 && $temp_game_position[$x - 1][$y] == $type) {
+                        $queue[] = [$x - 1, $y];
+                    }
+                    if ($x < $height - 1 && $temp_game_position[$x + 1][$y] == $type) {
+                        $queue[] = [$x + 1, $y];
+                    }
+                    if ($y > 0 && $temp_game_position[$x][$y - 1] != $type && $temp_game_position[$x][$y - 1] != 'a') {
+                        $t_code = int2alphabet($x) . int2alphabet($y - 1);
+                        $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y - 1];
+                    }
+                    if ($y < $width - 1 && $temp_game_position[$x][$y + 1] != $type && $temp_game_position[$x][$y + 1] != 'a') {
+                        $t_code = int2alphabet($x) . int2alphabet($y + 1);
+                        $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y + 1];
+                    }
+                    if ($x > 0 && $temp_game_position[$x - 1][$y] != $type && $temp_game_position[$x - 1][$y] != 'a') {
+                        $t_code = int2alphabet($x - 1) . int2alphabet($y);
+                        $area_neighbors[$area_id][$t_code] = $temp_game_position[$x - 1][$y];
+                    }
+                    if ($x < $height - 1 && $temp_game_position[$x + 1][$y] != $type && $temp_game_position[$x + 1][$y] != 'a') {
+                        $t_code = int2alphabet($x + 1) . int2alphabet($y);
+                        $area_neighbors[$area_id][$t_code] = $temp_game_position[$x + 1][$y];
+                    }
+                }
+            }
+            sort($area);
+            foreach ($area as $code) {
+                $area_by_point[$code] = $area_id;
+            }
+            $areas[$area_id] = $area;
+        }
+    }
+    return [$areas, $area_by_point, $area_neighbors];
+}
 
 function find_goban_edges($edge_image) {
     echo "Finding goban edges...\n";
@@ -482,4 +652,30 @@ function saturation_from_rgb($rgb) {
     $delta = $max - $min;
 
     return $delta;
+}
+
+function calculate_thresholds($matrix) {
+    do {
+        $clusters = kmeans($matrix, 3);
+    } while ( count($clusters) != 3 );
+
+    echo "Clusters:\n";
+    foreach ( $clusters as $key => $cluster ) {
+        echo "Cluster $key: " . min($cluster) . "-" . max($cluster) . "\n";
+    }
+    echo "\n";
+
+    $black_key = min(array_keys($clusters));
+    echo "Black key: $black_key\n";
+
+    $white_key = max(array_keys($clusters));
+    echo "White key: $white_key\n";
+
+    $black_threshold = max($clusters[$black_key]);
+    $white_threshold = min($clusters[$white_key]);
+
+    echo "Black threshold: $black_threshold\n";
+    echo "White threshold: $white_threshold\n";
+
+    return [$black_threshold, $white_threshold];
 }
