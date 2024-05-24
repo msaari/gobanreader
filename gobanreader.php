@@ -138,28 +138,50 @@ echo $sgf;
 $elapsed = round(microtime(true) - $time, 1);
 echo "\nElapsed time: $elapsed s\n";
 
+function print_game_position($game_position) {
+    $row_count = 0;
+    foreach ($game_position as $row) {
+        $column_count = 0;
+        foreach ($row as $point) {
+            echo $point;
+        }
+        echo "\n";
+    }
+}
+
 function analyze_game_position(&$game_position) {
     $height = count($game_position);
     $width = count($game_position[0]);
 
     list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
 
+    // Remove groups with one liberty.
     foreach ($area_neighbors as $area => $neighbors) {
         $neighbors = array_values($neighbors);
         $empty_count = count(array_keys($neighbors, ' '));
         if ($empty_count == 1) {
             foreach ($areas[$area] as $point) {
                 list($x, $y) = alphabet2xy($point);
-                $game_position[$x][$y] = $game_position[$x][$y] == 'B' ? 'C' : 'X';
+                $prisoners[$point] = $game_position[$x][$y];
+                $game_position[$x][$y] = $game_position[$x][$y] == 'B' ? 'w' : 'b';
             }
         }
     }
 
     list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
 
+    // Mark all territory surrounded by one color only.
     foreach ($area_neighbors as $area => $neighbors) {
+        $point = $areas[$area][0];
+        list($x, $y) = alphabet2xy($point);
+        $area_type = $game_position[$x][$y];
+        if ($area_type != ' ') {
+            continue;
+        }
         $unique_neighbors = array_values(array_unique($neighbors));
-        if (count($unique_neighbors) == 1 && $unique_neighbors[0] != ' ') {
+        sort($unique_neighbors);
+        $neighbor_string = implode('', $unique_neighbors);
+        if (in_array($neighbor_string, ['B', 'Bb', 'W', 'Ww'])) {
             foreach ($areas[$area] as $point) {
                 list($x, $y) = alphabet2xy($point);
                 $game_position[$x][$y] = $unique_neighbors[0] == 'B' ? 'b' : 'w';
@@ -167,32 +189,30 @@ function analyze_game_position(&$game_position) {
         }
     }
 
-    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
-
+    // Mark all territory for the colour that surrounds it more.
     foreach ($area_neighbors as $area => $neighbors) {
         $area_size = count($areas[$area]);
-        if ($area_size < 3) {
-            $unique_neighbors = array_values(array_unique($neighbors));
-            list($ax, $ay) = alphabet2xy($areas[$area][0]);
-            $area_type = $game_position[$ax][$ay];
-            if ($area_type != 'W' && $area_type != 'B') {
-                continue;
-            }
-            $kill_group = false;
-            if ($area_type == 'B' && (!in_array('B', $neighbors) && !in_array('b', $neighbors))) {
-                $kill_group = true;
-            }
-            if ($area_type == 'W' && (!in_array('w', $neighbors) && !in_array('w', $neighbors))) {
-                $kill_group = true;
-            }
-            if (count($unique_neighbors) == 1 && $unique_neighbors[0] == ' ') {
-                $kill_group = false;
-            }
-
-            if ($kill_group) {
+        if ($area_size < 4) {
+            // Protect dames.
+            continue;
+        }
+        $unique_neighbors = array_values(array_unique($neighbors));
+        if (count($unique_neighbors) == 2 && $unique_neighbors[0] != ' ' && $unique_neighbors[1] != ' ') {
+            $count1 = count(array_keys($neighbors, $unique_neighbors[0]));
+            $count2 = count(array_keys($neighbors, $unique_neighbors[1]));
+            if ($count1 > $count2) {
                 foreach ($areas[$area] as $point) {
                     list($x, $y) = alphabet2xy($point);
-                    $game_position[$x][$y] = $area_type == 'B' ? 'C' : 'X';
+                    if ($game_position[$x][$y] == ' ' && $unique_neighbors[0] != ' ') {
+                        $game_position[$x][$y] = $unique_neighbors[0] == 'B' ? 'b' : 'w';
+                    }
+                }
+            } elseif ($count2 > $count1) {
+                foreach ($areas[$area] as $point) {
+                    list($x, $y) = alphabet2xy($point);
+                    if ($game_position[$x][$y] == ' ' && $unique_neighbors[1] != ' ') {
+                        $game_position[$x][$y] = $unique_neighbors[1] == 'B' ? 'b' : 'w';
+                    }
                 }
             }
         }
@@ -200,16 +220,108 @@ function analyze_game_position(&$game_position) {
 
     list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
 
+    // If stone has white and black territory as neighbours, change the smaller side to match the larger side.
+    foreach ($area_neighbors as $area => $neighbors) {
+        $point = $areas[$area][0];
+        list($x, $y) = alphabet2xy($point);
+        $area_type = $game_position[$x][$y];
+        if ($area_type != 'B' && $area_type != 'W') {
+            continue;
+        }
+        $unique_neighbors = array_values(array_unique($neighbors));
+        if (in_array('b', $unique_neighbors) && in_array('w', $unique_neighbors)) {
+            $white_area_size = 0;
+            $black_area_size = 0;
+            $black_areas = [];
+            $white_areas = [];
+            $black_area_points = [];
+            $white_area_points = [];
+            foreach ($neighbors as $n_point => $n_type) {
+                if ($n_type == 'b') {
+                    $black_areas[] = $areas_by_point[$n_point];
+                }
+                if ($n_type == 'w') {
+                    $white_areas[] = $areas_by_point[$n_point];
+                }
+            }
+            $black_areas = array_unique($black_areas);
+            $white_areas = array_unique($white_areas);
+            foreach ($black_areas as $area) {
+                $black_area_size += count($areas[$area]);
+                $black_area_points = array_merge($black_area_points, $areas[$area]);
+            }
+            foreach ($white_areas as $area) {
+                $white_area_size += count($areas[$area]);
+                $white_area_points = array_merge($white_area_points, $areas[$area]);
+            }
+            $white_area_points = array_unique($white_area_points);
+            $black_area_points = array_unique($black_area_points);
+
+            if ($white_area_size > $black_area_size) {
+                foreach ($black_area_points as $point) {
+                    list($x, $y) = alphabet2xy($point);
+                    $game_position[$x][$y] = 'w';
+                }
+            } elseif ($black_area_size > $white_area_size) {
+                foreach ($white_area_points as $point) {
+                    list($x, $y) = alphabet2xy($point);
+                    $game_position[$x][$y] = 'b';
+                }
+            }
+        }
+    }
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    // Remove all stone groups that don't have friendly neighbours.
     foreach ($area_neighbors as $area => $neighbors) {
         $unique_neighbors = array_values(array_unique($neighbors));
-        if (count($unique_neighbors) == 1 && $unique_neighbors[0] != ' ') {
+        list($ax, $ay) = alphabet2xy($areas[$area][0]);
+        $area_type = $game_position[$ax][$ay];
+        if ($area_type != 'W' && $area_type != 'B') {
+            continue;
+        }
+        $kill_group = false;
+        if ($area_type == 'B' && (!in_array('B', $neighbors) && !in_array('b', $neighbors))) {
+            $kill_group = true;
+        }
+        if ($area_type == 'W' && (!in_array('w', $neighbors) && !in_array('w', $neighbors))) {
+            $kill_group = true;
+        }
+        if (count($unique_neighbors) == 1 && $unique_neighbors[0] == ' ') {
+            $kill_group = false;
+        }
+
+        if ($kill_group) {
             foreach ($areas[$area] as $point) {
                 list($x, $y) = alphabet2xy($point);
-                if ($game_position[$x][$y] != 'C' && $game_position[$x][$y] != 'X') {
+                $prisoners[$point] = $game_position[$x][$y];
+                $game_position[$x][$y] = $area_type == 'B' ? 'w' : 'b';
+            }
+        }
+    }
+
+    list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+    // Mark all territory surrounded by one color only.
+    foreach ($area_neighbors as $area => $neighbors) {
+        $unique_neighbors = array_values(array_unique($neighbors));
+        sort($unique_neighbors);
+        $neighbor_string = implode('', $unique_neighbors);
+        $area_point = $areas[$area][0];
+        if (in_array($neighbor_string, ['B', 'Bb', 'W', 'Ww'])) {
+            foreach ($areas[$area] as $point) {
+                list($x, $y) = alphabet2xy($point);
+                if ($game_position[$x][$y] == ' ') {
                     $game_position[$x][$y] = $unique_neighbors[0] == 'B' ? 'b' : 'w';
                 }
             }
         }
+    }
+
+    foreach ($prisoners as $point => $type) {
+        list($x, $y) = alphabet2xy($point);
+        $game_position[$x][$y] = $type == 'B' ? 'C' : 'X';
     }
 }
 
@@ -220,19 +332,15 @@ function alphabet2xy($code) {
 }
 
 function type_match($a, $b) {
-    if ($a == ' ' && $b == 'C') {
+    if ($a == $b) {
         return true;
     }
-    if ($a == ' ' && $b == 'X') {
-        return true;
-    }
-    if ($b == ' ' && $a == 'C') {
-        return true;
-    }
-    if ($b == ' ' && $a == 'X') {
-        return true;
-    }
-    return $a == $b;
+
+    $ab = [$a, $b];
+    sort($ab);
+    $ab = implode('', $ab);
+
+    return in_array($ab, [' X', ' C', 'bX', 'wC']);
 }
 
 function find_all_areas($game_position) {
@@ -263,7 +371,6 @@ function find_all_areas($game_position) {
                 $y = $point[1];
                 $code = int2alphabet($x + 1) . int2alphabet($y + 1);
                 if (type_match($temp_game_position[$x][$y], $type)) {
-                    echo $temp_game_position[$x][$y] . " and $type match\n";
                     $area[] = $code;
                     $temp_game_position[$x][$y] = 'a';
                     if ($y > 0 && type_match($temp_game_position[$x][$y - 1], $type)) {
@@ -279,19 +386,19 @@ function find_all_areas($game_position) {
                         $queue[] = [$x + 1, $y];
                     }
                     if ($y > 0 && !type_match($temp_game_position[$x][$y - 1], $type) && $temp_game_position[$x][$y - 1] != 'a') {
-                        $t_code = int2alphabet($x) . int2alphabet($y - 1);
+                        $t_code = int2alphabet($x + 1) . int2alphabet($y);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y - 1];
                     }
                     if ($y < $width - 1 && !type_match($temp_game_position[$x][$y + 1], $type) && $temp_game_position[$x][$y + 1] != 'a') {
-                        $t_code = int2alphabet($x) . int2alphabet($y + 1);
+                        $t_code = int2alphabet($x + 1) . int2alphabet($y + 2);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x][$y + 1];
                     }
                     if ($x > 0 && !type_match($temp_game_position[$x - 1][$y], $type) && $temp_game_position[$x - 1][$y] != 'a') {
-                        $t_code = int2alphabet($x - 1) . int2alphabet($y);
+                        $t_code = int2alphabet($x) . int2alphabet($y + 1);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x - 1][$y];
                     }
                     if ($x < $height - 1 && !type_match($temp_game_position[$x + 1][$y], $type) && $temp_game_position[$x + 1][$y] != 'a') {
-                        $t_code = int2alphabet($x + 1) . int2alphabet($y);
+                        $t_code = int2alphabet($x + 2) . int2alphabet($y + 1);
                         $area_neighbors[$area_id][$t_code] = $temp_game_position[$x + 1][$y];
                     }
                 }
