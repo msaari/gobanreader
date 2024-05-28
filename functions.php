@@ -1,8 +1,14 @@
 <?php
 
-function count_score($game_position) {
-    $white_score = 0;
-    $black_score = 0;
+function sanitize_komi($komi) {
+	$komi = str_replace(',', '.', $komi);
+	$komi = floatval($komi);
+	return $komi;
+}
+
+function count_score($game_position, $white_captures, $black_captures, $komi) {
+    $white_score = -intval($white_captures) + sanitize_komi($komi);
+    $black_score = -intval($black_captures);
     $row_count = 0;
 	$white_territory = 0;
 	$black_territory = 0;
@@ -18,23 +24,26 @@ function count_score($game_position) {
 				$white_territory++;
             }
             if ($point == 'X') {
-                $black_score += 2;
+                $black_score++;
+				$white_score--;
 				$black_territory++;
             }
             if ($point == 'C') {
-                $white_score += 2;
+                $white_score++;
+				$black_score--;
 				$white_territory++;
             }
             $column_count++;
         }
     }
+	echo "<h2>Result</h2>\n";
     if ($black_score > $white_score) {
-        echo "Black wins by " . ($black_score - $white_score) . " points: {$black_score}-{$white_score}\n";
+        echo "<p>Black wins by " . ($black_score - $white_score) . " points: <strong>{$black_score}-{$white_score}</strong></p>\n";
     } else {
-        echo "White wins by " . ($white_score - $black_score) . " points: {$white_score}-{$black_score}\n";
+        echo "<p>White wins by " . ($white_score - $black_score) . " points: <strong>{$white_score}-{$black_score}</strong></p>\n";
     }
-	echo "Black territory: $black_territory\n";
-	echo "White territory: $white_territory\n";
+	echo "<p>Black territory: $black_territory<br />";
+	echo "White territory: $white_territory</p>\n";
 }
 
 function print_game_position($game_position) {
@@ -53,6 +62,8 @@ function analyze_game_position(&$game_position) {
     $width = count($game_position[0]);
 
     list($areas, $areas_by_point, $area_neighbors) = find_all_areas($game_position);
+
+	$prisoners = [];
 
     // Remove groups with one liberty.
     foreach ($area_neighbors as $area => $neighbors) {
@@ -244,8 +255,8 @@ function type_match($a, $b) {
 
 function find_all_areas($game_position) {
     global $area_debug;
-    echo "Finding all chains...\n";
-    $areas = [];
+
+	$areas = [];
     $area_by_point = [];
     $area_neighbors = [];
 
@@ -313,11 +324,14 @@ function find_all_areas($game_position) {
 }
 
 function find_goban_edges($edge_image, $filename) {
-    echo "Finding goban edges...\n";
+	if (DEBUG) {
+		echo "Finding goban edges...\n";
+	}
 
     $width = imagesx($edge_image);
     $height = imagesy($edge_image);
-    $lines = detect_lines($edge_image);
+
+	$lines = detect_lines($edge_image);
 
     $red = imagecolorallocate($edge_image, 255, 0, 0);
     $green = imagecolorallocate($edge_image, 0, 255, 0);
@@ -326,7 +340,9 @@ function find_goban_edges($edge_image, $filename) {
     $top_edge = $height;
     $bottom_edge = 0;
     foreach ($lines as $line) {
-        imageline($edge_image, $line[0], $line[1], $line[2], $line[3], $red);
+		if (DEBUG) {
+			imageline($edge_image, $line[0], $line[1], $line[2], $line[3], $red);
+		}
         if ($line[0] == $line[2]) {
             if ($line[0] < $left_edge) {
                 $left_edge = $line[0];
@@ -344,22 +360,10 @@ function find_goban_edges($edge_image, $filename) {
         }
     }
 
-    echo "Bounding box: $left_edge x $top_edge - $right_edge x $bottom_edge\n";
-    imagerectangle($edge_image, $left_edge, $top_edge, $right_edge, $bottom_edge, $green);
-
-	$shortest_distance_from_left_edge = array();
-	foreach ($lines as $line) {
-		if ($line[0] == $line[2]) {
-			$distance = abs($line[0] - $left_edge);
-			if (!isset($shortest_distance_from_left_edge[$line[0]])) {
-				$shortest_distance_from_left_edge[$line[0]] = $distance;
-			} elseif ($distance < $shortest_distance_from_left_edge[$line[0]]) {
-				$shortest_distance_from_left_edge[$line[0]] = $distance;
-			}
-		}
+	if (DEBUG) {
+	    echo "Bounding box: $left_edge x $top_edge - $right_edge x $bottom_edge\n";
+    	imagerectangle($edge_image, $left_edge, $top_edge, $right_edge, $bottom_edge, $green);
 	}
-	ksort($shortest_distance_from_left_edge);
-	var_dump($shortest_distance_from_left_edge);
 
 	imagejpeg($edge_image, "uploads/{$filename}_lines.jpg");
 
@@ -368,11 +372,14 @@ function find_goban_edges($edge_image, $filename) {
         'y' => $top_edge + 5,
         'width' => $right_edge - $left_edge - 10,
         'height' => $bottom_edge - $top_edge - 10,
+		'image' => $edge_image,
     ];
 }
 
 function create_edge_image($gray_image, $filename) {
-    echo "Creating sobel edge image...\n";
+	if (DEBUG) {
+		echo "Creating sobel edge image...\n";
+	}
     $height = imagesy($gray_image);
     $width = imagesx($gray_image);
     $edge_image = imagecreatetruecolor($width, $height);
@@ -411,15 +418,19 @@ function create_edge_image($gray_image, $filename) {
 }
 
 function create_cropped_image($image) {
-    echo "Cropping to 1600px max...\n";
+    if (DEBUG) {
+		echo "Cropping to 2000px max...\n";
+	}
 
     $width = imagesx($image);
     $height = imagesy($image);
 
-	if ($width > 1600 || $height > 1600) {
-		// Rescale image to 1600px max keeping aspect ratio.
-		$scale = min(1600 / $width, 1600 / $height);
-		echo "Rescaling image to $scale\n";
+	if ($width > 2000 || $height > 2000) {
+		// Rescale image to 2000px max keeping aspect ratio.
+		$scale = min(2000 / $width, 2000 / $height);
+		if (DEBUG) {
+			echo "Rescaling image to $scale\n";
+		}
 		$new_width = round($width * $scale);
 		$new_height = round($height * $scale);
 		$new_image = imagecreatetruecolor($new_width, $new_height);
@@ -427,13 +438,17 @@ function create_cropped_image($image) {
 		$image = $new_image;
 		$width = $new_width;
 		$height = $new_height;
-		echo "New image size: $width x $height\n";
+		if (DEBUG) {
+			echo "New image size: $width x $height\n";
+		}
 	}
     return $image;
 }
 
 function create_grayscale_image($image, $filename) {
-    echo "Creating grayscale image...\n";
+    if (DEBUG) {
+		echo "Creating grayscale image...\n";
+	}
 
     $width = imagesx($image);
     $height = imagesy($image);
@@ -455,21 +470,6 @@ function create_grayscale_image($image, $filename) {
     return $gray_image;
 }
 
-function analyze_point($brightness) {
-    global $black_threshold, $white_threshold;
-    if ($brightness['average'] <= $black_threshold) {
-        return 'black';
-    } elseif ($brightness['average'] >= $white_threshold) {
-        return 'white';
-    } elseif ($brightness['lowest'] > 0) {
-        return 'white';
-    } elseif ($brightness['highest'] < 128) {
-        return 'black';
-    } else {
-        return 'empty';
-    }
-}
-
 function int2alphabet($int) {
     $alphabet = '';
     while ($int > 0) {
@@ -480,86 +480,8 @@ function int2alphabet($int) {
     return strtolower($alphabet);
 }
 
-function hue_from_rgb($rgb) {
-    $r = $rgb['red'] / 255;
-    $g = $rgb['green'] / 255;
-    $b = $rgb['blue'] / 255;
-    $max = max($r, $g, $b);
-    $min = min($r, $g, $b);
-    $delta = $max - $min;
-    if ($delta == 0) {
-        return 0;
-    } elseif ($max == $r) {
-        return round(60 * fmod(($g - $b) / $delta, 6));
-    } elseif ($max == $g) {
-        return round(60 * (($b - $r) / $delta + 2));
-    } elseif ($max == $b) {
-        return round(60 * (($r - $g) / $delta + 4));
-    }
-}
-
 function brightness_from_rgb($rgb) {
     return round(($rgb['red'] + $rgb['green'] + $rgb['blue']) / 3);
-}
-
-
-function kmeans($data, $k = 3, $maxIterations = 100) {
-    $n = count($data);
-    if ($n < $k) {
-        throw new Exception('Number of clusters cannot be greater than the number of data points');
-    }
-
-    sort($data);
-    $centroids = [$data[0], $data[$n - 1], $data[floor($n / 2)]];
-
-    $clusters = [];
-    $previousCentroids = [];
-
-    for ($i = 0; $i < $maxIterations; $i++) {
-        // Assign points to the nearest centroid
-        $clusters = [];
-        foreach ($data as $point) {
-            $closestCentroid = null;
-            $closestDistance = PHP_INT_MAX;
-            foreach ($centroids as $centroid) {
-                $distance = abs($point - $centroid);
-                if ($distance < $closestDistance) {
-                    $closestDistance = $distance;
-                    $closestCentroid = $centroid;
-                }
-            }
-            $clusters[$closestCentroid][] = $point;
-        }
-
-        // Calculate new centroids
-        $previousCentroids = $centroids;
-        $centroids = [];
-        foreach ($clusters as $cluster) {
-            $centroids[] = array_sum($cluster) / count($cluster);
-        }
-
-        // Check for convergence
-        if ($centroids === $previousCentroids) {
-            break;
-        }
-    }
-
-    // Final cluster assignment
-    $finalClusters = [];
-    foreach ($data as $point) {
-        $closestCentroid = null;
-        $closestDistance = PHP_INT_MAX;
-        foreach ($centroids as $centroid) {
-            $distance = abs($point - $centroid);
-            if ($distance < $closestDistance) {
-                $closestDistance = $distance;
-                $closestCentroid = $centroid;
-            }
-        }
-        $finalClusters[$closestCentroid][] = $point;
-    }
-
-    return $finalClusters;
 }
 
 function detect_lines($edge_image) {
@@ -568,191 +490,49 @@ function detect_lines($edge_image) {
 
     // Horizontal line detection
     for ($y = 0; $y < $height; $y++) {
-        $startX = -1;
+        $start_x = -1;
         for ($x = 0; $x < $width; $x++) {
             $color = imagecolorat($edge_image, $x, $y) & 0xFF;
             if ($color > 128) { // Adjust threshold as needed
-                if ($startX == -1) {
-                    $startX = $x;
+                if ($start_x == -1) {
+                    $start_x = $x;
                 }
             } else {
-                if ($startX != -1) {
-                    if ($x - $startX > $width * 0.1) { // Minimum length of the line
-                        $lines[] = [$startX, $y, $x - 1, $y];
+                if ($start_x != -1) {
+                    if ($x - $start_x > $width * 0.1) { // Minimum length of the line
+                        $lines[] = [$start_x, $y, $x - 1, $y];
                     }
-                    $startX = -1;
+                    $start_x = -1;
                 }
             }
         }
     }
-
-    echo "Horizontal lines: " . count($lines) . "\n";
 
     // Vertical line detection
     for ($x = 0; $x < $width; $x++) {
-        $startY = -1;
+        $start_y = -1;
         for ($y = 0; $y < $height; $y++) {
             $color = imagecolorat($edge_image, $x, $y) & 0xFF;
             if ($color > 128) {
-                if ($startY == -1) {
-                    $startY = $y;
+                if ($start_y == -1) {
+                    $start_y = $y;
                 }
             } else {
-                if ($startY != -1) {
-                    if ($y - $startY > $height * 0.1) {
-                        $lines[] = [$x, $startY, $x, $y - 1];
+                if ($start_y != -1) {
+                    if ($y - $start_y > $height * 0.1) {
+                        $lines[] = [$x, $start_y, $x, $y - 1];
                     }
-                    $startY = -1;
+                    $start_y = -1;
                 }
             }
         }
     }
 
-    echo "Vertical lines: " . count($lines) . "\n";
+	if (DEBUG) {
+		echo "Total lines: " . count($lines) . "\n";
+	}
 
     return $lines;
-}
-
-function create_brightness_matrix($cropped_image, $goban_size, $filename) {
-    echo "\nCreating brightness matrix:\n";
-    $width = imagesx($cropped_image);
-    $height = imagesy($cropped_image);
-
-    //imagefilter($cropped_image, IMG_FILTER_BRIGHTNESS, BRIGHTNESS);
-    imagefilter($cropped_image, IMG_FILTER_CONTRAST, CONTRAST);
-
-    $grid_image = imagecreatetruecolor($width, $height);
-    imagecopy($grid_image, $cropped_image, 0, 0, 0, 0, $width, $height);
-
-    $x_step = round($width / $goban_size);
-    $y_step = round($height / $goban_size);
-
-    $square_x = round($x_step / 3);
-    $square_y = round($y_step / 3);
-
-    echo "Image size: $width x $height\n";
-    echo "Grid size: $x_step x $y_step\n";
-    echo "Square size: " . $square_x . " x " . $square_y . "\n";
-
-    $y = 0;
-    $row_count = 0;
-    while ( $y < $height && $row_count < $goban_size ) {
-        $x = 0;
-        $column_count = 0;
-        while ( $x < $width && $column_count < $goban_size) {
-            $lowest_brightness = 255;
-            $highest_brightness = 0;
-            $total_brightness = 0;
-            $total_saturation = 0;
-            $start_x = $x + $square_x;
-            $start_y = $y + $square_y;
-            $end_x = $start_x + $square_x;
-            $end_y = $start_y + $square_y;
-            $counter = 0;
-            for ($pixel_y = $start_y; $pixel_y < $end_y; $pixel_y = $pixel_y + 2) {
-                for ($pixel_x = $start_x; $pixel_x < $end_x; $pixel_x = $pixel_x + 2) {
-                    $pixel_color = @imagecolorat($cropped_image, $pixel_x, $pixel_y);
-                    $pixel_rgb = imagecolorsforindex($cropped_image, $pixel_color);
-                    $pixel_brightness = brightness_from_rgb($pixel_rgb);
-                    if ( $pixel_brightness < $lowest_brightness ) {
-                        $lowest_brightness = $pixel_brightness;
-                    }
-                    if ( $pixel_brightness > $highest_brightness ) {
-                        $highest_brightness = $pixel_brightness;
-                    }
-                    $total_brightness += $pixel_brightness;
-                    $total_saturation += saturation_from_rgb($pixel_rgb);
-                    $counter++;
-                }
-            }
-
-            $average_brightness = round($total_brightness / ($square_x * $square_y));
-            $average_saturation = round($total_saturation / ($square_x * $square_y));
-
-            $brightness = [
-                'lowest' => $lowest_brightness,
-                'highest' => $highest_brightness,
-                'average' => $average_brightness,
-                'saturation' => $average_saturation,
-            ];
-            $average_brightness_values[] = $brightness['average'];
-            $grid_brightness[$row_count][$column_count] = $brightness;
-
-            echo str_pad($average_brightness, 3) . " ";
-
-            imagerectangle($grid_image,
-                $start_x, $start_y,
-                $end_x, $end_y,
-                imagecolorallocate($grid_image, 100, 100, 0)
-            );
-            imagestring(
-                $grid_image, 5, $x + $square_x / 2, $y,
-                $highest_brightness,
-                imagecolorallocate($grid_image, 255, 0, 0));
-            imagestring(
-                $grid_image, 5, $x + $square_x / 2, $y + 12,
-                $average_brightness,
-                imagecolorallocate($grid_image, 255, 0, 0));
-            imagestring(
-                $grid_image, 5, $x + $square_x / 2, $y + 24,
-                $lowest_brightness,
-                imagecolorallocate($grid_image, 255, 0, 0));
-            imagestring(
-                $grid_image, 5, $x + $square_x / 2, $y + 36,
-                $average_saturation,
-                imagecolorallocate($grid_image, 0, 255, 0));
-            $x += $x_step;
-            $column_count++;
-        }
-        echo "\n";
-        $y += $y_step;
-        $row_count++;
-    }
-    echo "\n";
-    echo "Creating grid image...\n";
-
-    imagejpeg($grid_image, "uploads/{$filename}_grid.jpg");
-    return [
-        'average_brightness_values' => $average_brightness_values,
-        'grid_brightness' => $grid_brightness,
-    ];
-}
-
-function saturation_from_rgb($rgb) {
-    $r = $rgb['red'];
-    $g = $rgb['green'];
-    $b = $rgb['blue'];
-    $max = max($r, $g, $b);
-    $min = min($r, $g, $b);
-    $delta = $max - $min;
-
-    return $delta;
-}
-
-function calculate_thresholds($matrix) {
-    do {
-        $clusters = kmeans($matrix, 3);
-    } while ( count($clusters) != 3 );
-
-    echo "Clusters:\n";
-    foreach ( $clusters as $key => $cluster ) {
-        echo "Cluster $key: " . min($cluster) . "-" . max($cluster) . "\n";
-    }
-    echo "\n";
-
-    $black_key = min(array_keys($clusters));
-    echo "Black key: $black_key\n";
-
-    $white_key = max(array_keys($clusters));
-    echo "White key: $white_key\n";
-
-    $black_threshold = max($clusters[$black_key]);
-    $white_threshold = min($clusters[$white_key]);
-
-    echo "Black threshold: $black_threshold\n";
-    echo "White threshold: $white_threshold\n";
-
-    return [$black_threshold, $white_threshold];
 }
 
 function validate_file() {
@@ -789,6 +569,204 @@ function validate_file() {
     }
     unlink($file_path); // Delete the temp file
 
-    echo "File uploaded successfully.\n";
+	if (DEBUG) {
+		echo "File uploaded successfully.\n";
+	}
     return $new_file_path;
+}
+
+function detect_stones($image, $filename) {
+	$width = imagesx($image);
+	$height = imagesy($image);
+
+	$x_step = round($width / GOBAN_SIZE);
+	$y_step = round($height / GOBAN_SIZE);
+
+	$green = imagecolorallocate($image, 0, 255, 0);
+	$red = imagecolorallocate($image, 255, 0, 0);
+	$black = imagecolorallocate($image, 0, 0, 0);
+	$white = imagecolorallocate($image, 255, 255, 255);
+
+	$image_copy = imagecreatetruecolor($width, $height);
+	imagecopy($image_copy, $image, 0, 0, 0, 0, $width, $height);
+
+    if (DEBUG) {
+		echo "Image size: $width x $height\n";
+		echo "Grid size: $x_step x $y_step\n";
+	}
+
+	$potential_stone_locations = array();
+	for ($y = 0; $y < $height - $y_step; $y += $y_step) {
+		for ($x = 0; $x < $width - $x_step; $x += $x_step) {
+			$mid_x = round($x + $x_step / 2);
+			$mid_y = round($y + $y_step / 2);
+
+			$potential_stone_locations[] = [$mid_x, $mid_y];
+
+			imagerectangle($image_copy, $x, $y, $x + $x_step, $y + $y_step, $green);
+			imagerectangle($image_copy, $mid_x-2, $mid_y-2, $mid_x+2, $mid_y+2, $green);
+		}
+	}
+
+	$stones = array();
+	$board_x = 0;
+	$board_y = 0;
+	foreach ($potential_stone_locations as $location) {
+		$stone = test_a_stone($image, $location[0], $location[1]);
+		if ($stone) {
+			imagefilledrectangle($image_copy, $location[0]-2, $location[1]-2, $location[0]+2, $location[1]+2, $red);
+			$stones[] = [$location[0], $location[1], $board_x, $board_y];
+		}
+		$board_x++;
+		if ($board_x == GOBAN_SIZE) {
+			$board_x = 0;
+			$board_y++;
+		}
+	}
+
+	imagejpeg($image_copy, "uploads/{$filename}_stones.jpg");
+
+	return $stones;
+}
+
+function test_a_stone($image, $start_x, $start_y) {
+	$brightness_index = 0;
+	$square_size = 6;
+	for ($x = $start_x-$square_size; $x <= $start_x+$square_size; $x++) {
+		for ($y = $start_y-$square_size; $y <= $start_y+$square_size; $y++) {
+			$color_index = imagecolorat($image, $x, $y);
+			$rgba = imagecolorsforindex($image, $color_index);
+			$brightness = brightness_from_rgb($rgba);
+			$brightness_index += $brightness;
+		}
+	}
+	$brightness_index = round($brightness_index / ($square_size * 2 + 1) ** 2);
+	return $brightness_index < 40;
+}
+
+function detect_stone_colors($image, $stones) {
+	$position = array();
+	foreach ($stones as $stone) {
+		$black = test_a_stone($image, $stone[0], $stone[1]);
+		if ($black) {
+			$position[$stone[3]][$stone[2]] = 'B';
+		} else {
+			$position[$stone[3]][$stone[2]] = 'W';
+		}
+	}
+	return $position;
+}
+
+function create_goban_image($game_position, $name) {
+	$goban_image = imagecreatefrompng('images/goban.png');
+	$goban_width = imagesx($goban_image);
+	$goban_height = imagesy($goban_image);
+	$goban_x_step = round($goban_width / GOBAN_SIZE);
+	$goban_y_step = round($goban_height / GOBAN_SIZE);
+
+	if (DEBUG) {
+		echo "Goban size: $goban_width x $goban_height\n";
+		echo "Goban grid size: $goban_x_step x $goban_y_step\n";
+	}
+
+	$white_stone = imagecreatefrompng('images/white.png');
+	$black_stone = imagecreatefrompng('images/black.png');
+	$stone_width = imagesx($white_stone);
+	$stone_height = imagesy($white_stone);
+
+	$white_captured = imagecreatefrompng('images/whitecaptured.png');
+	$black_captured = imagecreatefrompng('images/blackcaptured.png');
+
+	$white_area = imagecreatefrompng('images/whitearea.png');
+	$black_area = imagecreatefrompng('images/blackarea.png');
+	$area_width = imagesx($white_area);
+	$area_height = imagesy($white_area);
+
+	$row_count = 0;
+	foreach ($game_position as $row) {
+		$column_count = 0;
+		foreach ($row as $point) {
+			$item = '';
+			$item_w = '';
+			$item_h = '';
+			switch ($point) {
+				case 'B':
+					$item = $black_stone;
+					$item_w = $stone_width;
+					$item_h = $stone_height;
+					break;
+				case 'C':
+					$item = $black_captured;
+					$item_w = $stone_width;
+					$item_h = $stone_height;
+					break;
+				case 'W':
+					$item = $white_stone;
+					$item_w = $stone_width;
+					$item_h = $stone_height;
+					break;
+				case 'X':
+					$item = $white_captured;
+					$item_w = $stone_width;
+					$item_h = $stone_height;
+					break;
+				case 'b':
+					$item = $black_area;
+					$item_w = $area_width;
+					$item_h = $area_height;
+					break;
+				case 'w':
+					$item = $white_area;
+					$item_w = $area_width;
+					$item_h = $area_height;
+					break;
+				default:
+			}
+			if ($item) {
+				imagecopy($goban_image, $item,
+					$column_count * $goban_x_step,
+					$row_count * $goban_y_step,
+					0,
+					0,
+					$item_w,
+					$item_h);
+			}
+			$column_count++;
+		}
+		$row_count++;
+		echo "\n";
+	}
+
+	if (DEBUG) {
+		echo "Creating goban image...\n\n";
+	}
+	imagepng($goban_image, "gobans/{$name}_goban.png");
+}
+
+function game_position_from_stones($stone_position) {
+	$sgf = '(AP[GobanReader:0.10];GM[1];FF[5];';
+
+	$game_position = [];
+	for ($board_x = 0; $board_x < GOBAN_SIZE; $board_x++) {
+		$game_position[$board_x] = [];
+		for ($board_y = 0; $board_y < GOBAN_SIZE; $board_y++) {
+			if (isset($stone_position[$board_x][$board_y])) {
+				if ($stone_position[$board_x][$board_y] == 'B') {
+					$game_position[$board_x][$board_y] = 'B';
+					$sgf .= 'AB[' . int2alphabet($board_y + 1)
+						. int2alphabet($board_x + 1) . '];';
+				} elseif ($stone_position[$board_x][$board_y] == 'W') {
+					$game_position[$board_x][$board_y] = 'W';
+					$sgf .= 'AW[' . int2alphabet($board_y + 1)
+						. int2alphabet($board_x + 1) . '];';
+				}
+			} else {
+				$game_position[$board_x][$board_y] = ' ';
+			}
+		}
+	}
+
+	$sgf .= ')';
+
+	return [$game_position, $sgf];
 }
