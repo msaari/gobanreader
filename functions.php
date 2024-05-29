@@ -27,23 +27,29 @@ function count_score($game_position, $white_captures, $black_captures, $komi) {
                 $black_score++;
 				$white_score--;
 				$black_territory++;
+				$white_captures++;
             }
             if ($point == 'C') {
                 $white_score++;
 				$black_score--;
 				$white_territory++;
+				$black_captures++;
             }
             $column_count++;
         }
     }
-	echo "<h2>Result</h2>\n";
     if ($black_score > $white_score) {
-        echo "<p>Black wins by " . ($black_score - $white_score) . " points: <strong>{$black_score}-{$white_score}</strong></p>\n";
+        echo "<p id='winner'><img src='images/black.png' class='stone' />Black wins by " . ($black_score - $white_score) . " points</p>\n";
+		echo "<div id='score'>{$black_score}-{$white_score}</div>\n";
     } else {
-        echo "<p>White wins by " . ($white_score - $black_score) . " points: <strong>{$white_score}-{$black_score}</strong></p>\n";
+        echo "<p id='winner'><img src='images/white.png' class='stone' />White wins by " . ($white_score - $black_score) . " points</p>\n";
+		echo "<div id='score'>{$white_score}-{$black_score}</div>\n";
     }
-	echo "<p>Black territory: $black_territory<br />";
-	echo "White territory: $white_territory</p>\n";
+	echo "<div id='score_details'><div>Black territory: $black_territory<br />";
+	echo "Black prisoners: $black_captures</div>";
+	echo "<div>White territory: $white_territory<br />";
+	echo "White prisoners: $white_captures<br />";
+	echo "Komi: $komi</div></div>\n";
 }
 
 function print_game_position($game_position) {
@@ -612,7 +618,7 @@ function detect_stones($image, $filename) {
 	$board_x = 0;
 	$board_y = 0;
 	foreach ($potential_stone_locations as $location) {
-		$stone = test_a_stone($image, $location[0], $location[1]);
+		$stone = test_a_stone($image, $location[0], $location[1], STONE_THRESHOLD);
 		if ($stone) {
 			imagefilledrectangle($image_copy, $location[0]-2, $location[1]-2, $location[0]+2, $location[1]+2, $red);
 			$stones[] = [$location[0], $location[1], $board_x, $board_y];
@@ -629,7 +635,7 @@ function detect_stones($image, $filename) {
 	return $stones;
 }
 
-function test_a_stone($image, $start_x, $start_y) {
+function test_a_stone($image, $start_x, $start_y, $threshold) {
 	$brightness_index = 0;
 	$square_size = 6;
 	for ($x = $start_x-$square_size; $x <= $start_x+$square_size; $x++) {
@@ -641,13 +647,16 @@ function test_a_stone($image, $start_x, $start_y) {
 		}
 	}
 	$brightness_index = round($brightness_index / ($square_size * 2 + 1) ** 2);
-	return $brightness_index < 40;
+	if (DEBUG) {
+		echo "Brightness index ($start_x, $start_y): $brightness_index\n";
+	}
+	return $brightness_index < $threshold;
 }
 
 function detect_stone_colors($image, $stones) {
 	$position = array();
 	foreach ($stones as $stone) {
-		$black = test_a_stone($image, $stone[0], $stone[1]);
+		$black = test_a_stone($image, $stone[0], $stone[1], WHITE_THRESHOLD);
 		if ($black) {
 			$position[$stone[3]][$stone[2]] = 'B';
 		} else {
