@@ -45,7 +45,7 @@ $image = imagecreatefromjpeg($src);
 
 $image = create_cropped_image($image);
 $gray_image = create_grayscale_image($image, $name);
-$edge_image = create_edge_image($gray_image, $name);*/
+$edge_image = create_edge_image($gray_image, $name);
 $bounding_box = find_goban_edges($edge_image, $name);
 
 $edge_image = $bounding_box['image'];
